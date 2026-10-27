@@ -14,6 +14,8 @@ export interface Note {
 }
 
 export interface LocalNote extends Note {
+  ownerId: string;
+  localRevision: number;
   dirty: boolean;
 }
 
@@ -23,6 +25,7 @@ export type FilterType = 'all' | 'pinned' | 'archived';
 
 export interface Revision {
   id?: number;
+  ownerId: string;
   noteId: string;
   title: string;
   body: string;

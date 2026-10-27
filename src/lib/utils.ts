@@ -1,3 +1,20 @@
+import type { LocalNote } from './types';
+
+export function applyNoteUpdates(
+  note: LocalNote,
+  updates: Partial<LocalNote>,
+  now = Date.now(),
+): LocalNote {
+  return {
+    ...note,
+    ...updates,
+    ownerId: note.ownerId,
+    localRevision: note.localRevision + 1,
+    updatedAt: now,
+    dirty: true,
+  };
+}
+
 export function formatRelativeTime(timestamp: number): string {
   const now = Date.now();
   const diff = now - timestamp;

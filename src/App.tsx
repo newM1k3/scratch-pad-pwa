@@ -26,7 +26,6 @@ function App() {
     updateNote,
     togglePin,
     archiveNote,
-    setColor,
     deleteNote,
     runSync,
   } = useNotes(user?.id, isOnline);

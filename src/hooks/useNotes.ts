@@ -1,12 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { LocalNote, NoteColor, FilterType, SyncStatus } from '@/lib/types';
-import {
-  getAllNotes,
-  putNote,
-  deleteNoteLocal,
-} from '@/lib/db';
+import { getAllNotes, putNote } from '@/lib/db';
 import { syncNotes } from '@/lib/sync';
-import { generateId } from '@/lib/utils';
+import { applyNoteUpdates, generateId } from '@/lib/utils';
 
 export function useNotes(userId: string | undefined, isOnline: boolean) {
   const [notes, setNotes] = useState<LocalNote[]>([]);
@@ -15,9 +11,19 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
   const [filter, setFilter] = useState<FilterType>('all');
   const [search, setSearch] = useState('');
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadGeneration = useRef(0);
+  const ownerRef = useRef(userId);
+  ownerRef.current = userId;
 
   const loadNotes = useCallback(async () => {
-    const all = await getAllNotes();
+    const generation = ++loadGeneration.current;
+    if (!userId) {
+      setNotes([]);
+      setActiveId(null);
+      return;
+    }
+    const all = await getAllNotes(userId);
+    if (generation !== loadGeneration.current) return;
     const visible = all.filter((n) => !n.deleted);
     visible.sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -27,11 +33,22 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
     if (!activeId && visible.length > 0) {
       setActiveId(visible[0].id);
     }
-  }, [activeId]);
+  }, [activeId, userId]);
+
+  useEffect(() => {
+    setNotes([]);
+    setActiveId(null);
+  }, [userId]);
 
   useEffect(() => {
     loadNotes();
   }, [loadNotes]);
+
+  useEffect(() => {
+    return () => {
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+    };
+  }, [userId]);
 
   const runSync = useCallback(async () => {
     if (!userId || !isOnline) {
@@ -65,9 +82,11 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
   }, [isOnline, userId, runSync]);
 
   const createNote = useCallback(async () => {
+    if (!userId) throw new Error('Cannot create a note without an authenticated user');
     const now = Date.now();
     const note: LocalNote = {
       id: generateId(),
+      ownerId: userId,
       remoteId: null,
       title: '',
       body: '',
@@ -77,21 +96,21 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
       deleted: false,
       updatedAt: now,
       createdAt: now,
+      localRevision: 1,
       dirty: true,
     };
     await putNote(note);
+    if (ownerRef.current !== userId) return note;
     setNotes((prev) => [note, ...prev]);
     setActiveId(note.id);
     return note;
-  }, []);
+  }, [userId]);
 
   const updateNote = useCallback(
     async (id: string, updates: Partial<LocalNote>) => {
       setNotes((prev) => {
         const next = prev.map((n) =>
-          n.id === id
-            ? { ...n, ...updates, updatedAt: Date.now(), dirty: true }
-            : n
+          n.id === id ? applyNoteUpdates(n, updates) : n
         );
         const updated = next.find((n) => n.id === id);
         if (updated) putNote(updated);
@@ -107,7 +126,7 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
       setNotes((prev) => {
         const note = prev.find((n) => n.id === id);
         if (!note) return prev;
-        const updated = { ...note, pinned: !note.pinned, updatedAt: Date.now(), dirty: true };
+        const updated = applyNoteUpdates(note, { pinned: !note.pinned });
         putNote(updated);
         return prev.map((n) => (n.id === id ? updated : n));
       });
@@ -121,7 +140,7 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
       setNotes((prev) => {
         const note = prev.find((n) => n.id === id);
         if (!note) return prev;
-        const updated = { ...note, archived: !note.archived, updatedAt: Date.now(), dirty: true };
+        const updated = applyNoteUpdates(note, { archived: !note.archived });
         putNote(updated);
         return prev.map((n) => (n.id === id ? updated : n));
       });
@@ -142,7 +161,7 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
       setNotes((prev) => {
         const note = prev.find((n) => n.id === id);
         if (!note) return prev;
-        const updated = { ...note, deleted: true, updatedAt: Date.now(), dirty: true };
+        const updated = applyNoteUpdates(note, { deleted: true });
         putNote(updated);
         return prev.filter((n) => n.id !== id);
       });
@@ -156,6 +175,7 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
   );
 
   const filteredNotes = notes.filter((n) => {
+    if (n.ownerId !== userId) return false;
     if (filter === 'pinned' && !n.pinned) return false;
     if (filter === 'archived' && !n.archived) return false;
     if (filter === 'all' && n.archived) return false;
@@ -169,7 +189,7 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
     return true;
   });
 
-  const activeNote = notes.find((n) => n.id === activeId) ?? null;
+  const activeNote = notes.find((n) => n.id === activeId && n.ownerId === userId) ?? null;
 
   return {
     notes: filteredNotes,

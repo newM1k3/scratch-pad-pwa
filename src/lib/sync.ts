@@ -1,6 +1,12 @@
 import pb from './pocketbase';
 import type { LocalNote, NoteColor } from './types';
-import { getAllNotes, putNote, deleteNoteLocal, addRevision } from './db';
+import {
+  getAllNotes,
+  deleteNoteLocal,
+  addRevision,
+  markNoteSynced,
+  putRemoteNote,
+} from './db';
 
 interface RemoteNote {
   id: string;
@@ -15,9 +21,10 @@ interface RemoteNote {
   created_at: number;
 }
 
-function toLocalNote(r: RemoteNote): LocalNote {
+function toLocalNote(r: RemoteNote, ownerId: string): LocalNote {
   return {
     id: r.client_id,
+    ownerId,
     remoteId: r.id,
     title: r.title ?? '',
     body: r.body ?? '',
@@ -27,6 +34,7 @@ function toLocalNote(r: RemoteNote): LocalNote {
     deleted: r.deleted ?? false,
     updatedAt: r.updated_at ?? 0,
     createdAt: r.created_at ?? 0,
+    localRevision: 0,
     dirty: false,
   };
 }
@@ -52,8 +60,8 @@ export interface SyncResult {
   conflicts: number;
 }
 
-export async function syncNotes(userId: string): Promise<SyncResult> {
-  const localNotes = await getAllNotes();
+async function performSync(userId: string): Promise<SyncResult> {
+  const localNotes = await getAllNotes(userId);
   const remoteNotes = await pb.collection('notes').getFullList<RemoteNote>({
     filter: `user = "${userId}"`,
   });
@@ -61,61 +69,79 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
   let pushed = 0;
   let pulled = 0;
   let conflicts = 0;
+  let failedPushes = 0;
+  const pushedNoteIds = new Set<string>();
 
-  // Push dirty local notes
+  // Push dirty local notes unless the fetched remote version is newer
   for (const localNote of localNotes) {
     if (!localNote.dirty) continue;
+    const existing = remoteNotes.find((r) => r.client_id === localNote.id);
+    if (existing && existing.updated_at > localNote.updatedAt) continue;
     const data = toRemoteData(localNote, userId);
     try {
-      if (localNote.remoteId) {
-        await pb.collection('notes').update(localNote.remoteId, data);
+      let remoteId = localNote.remoteId;
+      if (remoteId) {
+        await pb.collection('notes').update(remoteId, data);
       } else {
-        const existing = remoteNotes.find((r) => r.client_id === localNote.id);
         if (existing) {
-          await pb.collection('notes').update(existing.id, data);
-          localNote.remoteId = existing.id;
+          remoteId = existing.id;
+          await pb.collection('notes').update(remoteId, data);
         } else {
           const created = await pb.collection('notes').create(data);
-          localNote.remoteId = created.id;
+          remoteId = created.id;
         }
       }
-      localNote.dirty = false;
-      await putNote(localNote);
+      await markNoteSynced(
+        userId,
+        localNote.id,
+        remoteId,
+        localNote.localRevision,
+      );
+      pushedNoteIds.add(localNote.id);
       pushed++;
     } catch (err) {
+      failedPushes++;
       console.error('Sync: failed to push note', localNote.id, err);
     }
   }
 
-  // Pull and reconcile remote notes
+  // Pull and reconcile remote notes, excluding freshly pushed snapshots
   for (const remote of remoteNotes) {
+    if (pushedNoteIds.has(remote.client_id)) continue;
     const local = localNotes.find((n) => n.id === remote.client_id);
 
     if (!local) {
       if (!remote.deleted) {
-        await putNote(toLocalNote(remote));
-        pulled++;
+        const written = await putRemoteNote(toLocalNote(remote, userId));
+        if (written) pulled++;
       }
     } else if (local.dirty) {
       if (remote.updated_at > local.updatedAt) {
         if (local.title || local.body) {
           await addRevision({
+            ownerId: userId,
             noteId: local.id,
             title: local.title,
             body: local.body,
             savedAt: Date.now(),
           });
         }
-        await putNote({ ...toLocalNote(remote), remoteId: remote.id });
-        conflicts++;
+        const written = await putRemoteNote(
+          toLocalNote(remote, userId),
+          local.localRevision,
+        );
+        if (written) conflicts++;
       }
     } else {
       if (remote.updated_at > local.updatedAt || local.remoteId !== remote.id) {
-        await putNote({ ...toLocalNote(remote), remoteId: remote.id });
-        pulled++;
+        const written = await putRemoteNote(
+          toLocalNote(remote, userId),
+          local.localRevision,
+        );
+        if (written) pulled++;
       }
       if (remote.deleted && !local.deleted) {
-        await deleteNoteLocal(local.id);
+        await deleteNoteLocal(userId, local.id, local.localRevision);
         pulled++;
       }
     }
@@ -123,10 +149,35 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
 
   // Cleanup: hard-delete local notes that are deleted and synced
   for (const localNote of localNotes) {
-    if (localNote.deleted && !localNote.dirty) {
-      await deleteNoteLocal(localNote.id);
+    if (localNote.deleted && (!localNote.dirty || pushedNoteIds.has(localNote.id))) {
+      await deleteNoteLocal(userId, localNote.id, localNote.localRevision);
     }
   }
 
+  if (failedPushes > 0) {
+    throw new Error(
+      `Sync: ${failedPushes} note${failedPushes === 1 ? '' : 's'} failed to push`,
+    );
+  }
+
   return { pushed, pulled, conflicts };
+}
+
+const syncQueues = new Map<string, Promise<void>>();
+
+export async function syncNotes(userId: string): Promise<SyncResult> {
+  const previous = syncQueues.get(userId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  syncQueues.set(userId, current);
+
+  await previous;
+  try {
+    return await performSync(userId);
+  } finally {
+    release();
+    if (syncQueues.get(userId) === current) syncQueues.delete(userId);
+  }
 }
