@@ -32,6 +32,8 @@ npm run check
 
 `npm run check` runs TypeScript, the regression test suite, and the production build. Run `npm run lint` separately for ESLint.
 
+Continuous integration (`.github/workflows/ci.yml`) runs `npm run check`, `npm run lint`, and `npm run smoke` on every push and pull request. Netlify runs `npm run check` on deploy builds; the browser smoke test stays in CI because Netlify's build image has no browser.
+
 ### Browser smoke test
 
 `npm run smoke` runs a browser-level end-to-end test against a throwaway PocketBase 0.40.6 instance: it signs up two accounts in headless Chrome, verifies account isolation in both directions, kills the server to force offline queueing, restarts it to verify reconnect sync, and checks record ownership on the server. It needs Google Chrome or Microsoft Edge installed (`CHROME_PATH` overrides the browser binary) and uses ports 7100, 8099, and 9222, which must be free. On first run it downloads PocketBase into `node_modules/.cache`; all server data lives in a temp directory and is deleted when the test finishes.

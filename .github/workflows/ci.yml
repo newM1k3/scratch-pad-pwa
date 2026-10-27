@@ -1,0 +1,35 @@
+name: CI
+
+"on":
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: Typecheck, tests, build, lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+
+  smoke:
+    name: Browser smoke test (Chrome + disposable PocketBase)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Ubuntu runners ship with Google Chrome preinstalled; the script finds
+      # it on PATH. It downloads PocketBase 0.40.6 on first run and cleans up
+      # all processes and data when it finishes.
+      - run: npm run smoke
