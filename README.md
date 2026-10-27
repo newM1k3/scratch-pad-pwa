@@ -21,6 +21,17 @@ A fast, installable notes app where notes open in a two-pane layout instead of p
 - IndexedDB (offline cache + write queue)
 - Netlify (static hosting)
 
+## Development
+
+Use **Node.js 24** for local development and CI; Netlify is configured to use the same runtime.
+
+```bash
+npm ci
+npm run check
+```
+
+`npm run check` runs TypeScript, the regression test suite, and the production build. Run `npm run lint` separately for ESLint.
+
 See `docs/setup.md` for environment variables, PocketBase collection schema, API rules, and deploy steps.
 
 ## Unfinished / Stubbed

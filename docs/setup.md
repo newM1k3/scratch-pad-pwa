@@ -20,6 +20,7 @@ A fast, installable notes app with a two-pane layout (note list on the left, liv
 - **Backend / Auth**: PocketBase (data + email/password auth)
 - **Local store**: IndexedDB (offline cache + write queue)
 - **Hosting**: Netlify (static frontend)
+- **Runtime**: Node.js 24 for development, CI, and Netlify builds
 
 ## Environment Variables
 
