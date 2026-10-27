@@ -14,6 +14,12 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
   const loadGeneration = useRef(0);
   const ownerRef = useRef(userId);
   ownerRef.current = userId;
+  // Mirrors `notes` so callbacks can compute the next state synchronously and
+  // persist it without putting side effects inside setState updaters (updaters
+  // run in the render phase and may be delayed or replayed, which previously
+  // let a sync read IndexedDB before the local write landed).
+  const notesRef = useRef<LocalNote[]>([]);
+  notesRef.current = notes;
 
   const loadNotes = useCallback(async () => {
     const generation = ++loadGeneration.current;
@@ -36,6 +42,7 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
   }, [activeId, userId]);
 
   useEffect(() => {
+    notesRef.current = [];
     setNotes([]);
     setActiveId(null);
   }, [userId]);
@@ -108,14 +115,13 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
 
   const updateNote = useCallback(
     async (id: string, updates: Partial<LocalNote>) => {
-      setNotes((prev) => {
-        const next = prev.map((n) =>
-          n.id === id ? applyNoteUpdates(n, updates) : n
-        );
-        const updated = next.find((n) => n.id === id);
-        if (updated) putNote(updated);
-        return next;
-      });
+      const next = notesRef.current.map((n) =>
+        n.id === id ? applyNoteUpdates(n, updates) : n
+      );
+      const updated = next.find((n) => n.id === id);
+      notesRef.current = next;
+      setNotes(next);
+      if (updated) void putNote(updated);
       scheduleSync();
     },
     [scheduleSync]
@@ -123,13 +129,13 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
 
   const togglePin = useCallback(
     (id: string) => {
-      setNotes((prev) => {
-        const note = prev.find((n) => n.id === id);
-        if (!note) return prev;
-        const updated = applyNoteUpdates(note, { pinned: !note.pinned });
-        putNote(updated);
-        return prev.map((n) => (n.id === id ? updated : n));
-      });
+      const note = notesRef.current.find((n) => n.id === id);
+      if (!note) return;
+      const updated = applyNoteUpdates(note, { pinned: !note.pinned });
+      const next = notesRef.current.map((n) => (n.id === id ? updated : n));
+      notesRef.current = next;
+      setNotes(next);
+      void putNote(updated);
       scheduleSync();
     },
     [scheduleSync]
@@ -137,13 +143,13 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
 
   const archiveNote = useCallback(
     (id: string) => {
-      setNotes((prev) => {
-        const note = prev.find((n) => n.id === id);
-        if (!note) return prev;
-        const updated = applyNoteUpdates(note, { archived: !note.archived });
-        putNote(updated);
-        return prev.map((n) => (n.id === id ? updated : n));
-      });
+      const note = notesRef.current.find((n) => n.id === id);
+      if (!note) return;
+      const updated = applyNoteUpdates(note, { archived: !note.archived });
+      const next = notesRef.current.map((n) => (n.id === id ? updated : n));
+      notesRef.current = next;
+      setNotes(next);
+      void putNote(updated);
       scheduleSync();
     },
     [scheduleSync]
@@ -158,20 +164,19 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
 
   const deleteNote = useCallback(
     async (id: string) => {
-      setNotes((prev) => {
-        const note = prev.find((n) => n.id === id);
-        if (!note) return prev;
-        const updated = applyNoteUpdates(note, { deleted: true });
-        putNote(updated);
-        return prev.filter((n) => n.id !== id);
-      });
+      const note = notesRef.current.find((n) => n.id === id);
+      if (!note) return;
+      const tombstone = applyNoteUpdates(note, { deleted: true });
+      const next = notesRef.current.filter((n) => n.id !== id);
+      notesRef.current = next;
+      setNotes(next);
+      void putNote(tombstone);
       if (activeId === id) {
-        const remaining = notes.filter((n) => n.id !== id);
-        setActiveId(remaining.length > 0 ? remaining[0].id : null);
+        setActiveId(next.length > 0 ? next[0].id : null);
       }
       scheduleSync();
     },
-    [activeId, notes, scheduleSync]
+    [activeId, scheduleSync]
   );
 
   const filteredNotes = notes.filter((n) => {
