@@ -703,6 +703,8 @@ async function main() {
   await waitForText(cdp, 'Synced', 30000);
 
   stage('Verifying server records and second-account isolation');
+  // TEST-ONLY deliberate failure (branch-protection verification). Never merge.
+  fail('deliberate smoke failure to verify branch protection blocks red PRs');
   const summary = await listServerRecords();
   console.log(JSON.stringify(summary, null, 2));
   for (const [user, note] of [
