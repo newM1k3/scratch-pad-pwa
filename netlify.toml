@@ -1,0 +1,13 @@
+[build]
+  command = "npm run check"
+  publish = "dist"
+  functions = "netlify/functions"
+  node_bundler = "esbuild"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
