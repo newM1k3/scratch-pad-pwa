@@ -148,7 +148,7 @@ function pbArchiveUrl() {
   if (process.platform === 'darwin') {
     return `https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_darwin_${arch}.zip`;
   }
-  return `https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_${arch}.tar.gz`;
+  return `https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_${arch}.zip`;
 }
 
 async function download(url, dest) {
