@@ -34,7 +34,7 @@ Server-only credentials (if needed for Netlify Functions) live in Netlify enviro
 
 ### Collections
 
-#### `notes`
+#### `scratch_notes`
 
 | Field | Type | Options |
 |---|---|---|
@@ -51,7 +51,7 @@ Server-only credentials (if needed for Netlify Functions) live in Netlify enviro
 
 ### API Rules
 
-**Collection: `notes`**
+**Collection: `scratch_notes`**
 
 - **List/Search**: `user = @request.auth.id`
 - **View**: `user = @request.auth.id`
@@ -63,7 +63,7 @@ This ensures every user can only access their own notes.
 
 ## Deploy Steps
 
-1. **PocketBase**: Ensure the PocketBase instance is running at the URL specified in `VITE_POCKETBASE_URL`. Create the `notes` collection with the fields and API rules above.
+1. **PocketBase**: Ensure the PocketBase instance is running at the URL specified in `VITE_POCKETBASE_URL`. Create the `scratch_notes` collection (prefixed because the PocketBase instance is shared with other apps; a bare `notes` collection there belongs to something else) with the fields and API rules above.
 2. **Frontend**: Push to your repository connected to Netlify, or deploy manually. The `netlify.toml` configures the build (`npm run check`), publish directory (`dist`), and SPA redirects.
 3. **Verify**: After deploy, open the app, sign up, and create a note. It should sync to PocketBase and persist across devices.
 
