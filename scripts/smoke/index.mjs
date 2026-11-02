@@ -44,6 +44,9 @@ const CHROME_PROFILE_DIR = path.join(RUNTIME_DIR, 'chrome-profile');
 const SU_EMAIL = 'scratchpad-smoke@test.local';
 const SU_PASSWORD = 'SmokeTest-Password-2026';
 
+/** Must match NOTES_COLLECTION in src/lib/sync.ts. */
+const NOTES_COLLECTION = 'scratch_notes';
+
 const USER_A = { email: 'smoke-user-a@example.test', password: 'SmokePassword-A-2026' };
 const USER_B = { email: 'smoke-user-b@example.test', password: 'SmokePassword-B-2026' };
 const NOTE_A = { title: 'A private title', body: 'Private content for account A' };
@@ -227,7 +230,7 @@ async function createNotesCollection(token) {
   await pbApi('POST', '/api/collections', {
     token,
     body: {
-      name: 'scratch_notes',
+      name: NOTES_COLLECTION,
       type: 'base',
       fields: [
         { name: 'title', type: 'text', presentable: true },
@@ -512,7 +515,7 @@ async function createSyncedNote(cdp, note) {
 let superuserToken = null;
 
 async function listServerRecords() {
-  const data = await pbApi('GET', '/api/collections/notes/records?perPage=100&expand=user', {
+  const data = await pbApi('GET', `/api/collections/${NOTES_COLLECTION}/records?perPage=100&expand=user`, {
     token: superuserToken,
   });
   return (data.items ?? []).map((record) => ({
