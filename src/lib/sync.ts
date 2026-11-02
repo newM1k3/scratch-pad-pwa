@@ -8,6 +8,13 @@ import {
   putRemoteNote,
 } from './db';
 
+/**
+ * PocketBase collection for synced notes. Prefixed because the backend is a
+ * SHARED instance (mjwdesign-core) where a bare `notes` collection already
+ * belongs to another app — the prefix keeps schemas from colliding.
+ */
+const NOTES_COLLECTION = 'scratch_notes';
+
 interface RemoteNote {
   id: string;
   client_id: string;
@@ -62,7 +69,7 @@ export interface SyncResult {
 
 async function performSync(userId: string): Promise<SyncResult> {
   const localNotes = await getAllNotes(userId);
-  const remoteNotes = await pb.collection('notes').getFullList<RemoteNote>({
+  const remoteNotes = await pb.collection(NOTES_COLLECTION).getFullList<RemoteNote>({
     filter: `user = "${userId}"`,
   });
 
@@ -81,13 +88,13 @@ async function performSync(userId: string): Promise<SyncResult> {
     try {
       let remoteId = localNote.remoteId;
       if (remoteId) {
-        await pb.collection('notes').update(remoteId, data);
+        await pb.collection(NOTES_COLLECTION).update(remoteId, data);
       } else {
         if (existing) {
           remoteId = existing.id;
-          await pb.collection('notes').update(remoteId, data);
+          await pb.collection(NOTES_COLLECTION).update(remoteId, data);
         } else {
-          const created = await pb.collection('notes').create(data);
+          const created = await pb.collection(NOTES_COLLECTION).create(data);
           remoteId = created.id;
         }
       }

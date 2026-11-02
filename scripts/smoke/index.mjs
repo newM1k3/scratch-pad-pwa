@@ -227,7 +227,7 @@ async function createNotesCollection(token) {
   await pbApi('POST', '/api/collections', {
     token,
     body: {
-      name: 'notes',
+      name: 'scratch_notes',
       type: 'base',
       fields: [
         { name: 'title', type: 'text', presentable: true },
@@ -253,7 +253,7 @@ async function createNotesCollection(token) {
       deleteRule: 'user = @request.auth.id',
     },
   });
-  console.log('Created isolated notes collection with user-scoped API rules.');
+  console.log('Created isolated scratch_notes collection with user-scoped API rules.');
 }
 
 // ---------------------------------------------------------------------------
