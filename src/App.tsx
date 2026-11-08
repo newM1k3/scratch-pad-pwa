@@ -27,6 +27,8 @@ function App() {
     togglePin,
     archiveNote,
     deleteNote,
+    undoDelete,
+    lastDeleted,
     runSync,
   } = useNotes(user?.id, isOnline);
 
@@ -129,6 +131,19 @@ function App() {
           />
         </div>
       </div>
+
+      {/* Undo offer for the most recent delete (auto-dismisses) */}
+      {lastDeleted && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 px-4 py-2.5 bg-stone-900 text-white text-sm rounded-xl shadow-lg">
+          <span className="text-stone-200">Note deleted</span>
+          <button
+            onClick={undoDelete}
+            className="font-medium text-amber-300 hover:text-amber-200 transition-colors"
+          >
+            Undo
+          </button>
+        </div>
+      )}
     </div>
   );
 }

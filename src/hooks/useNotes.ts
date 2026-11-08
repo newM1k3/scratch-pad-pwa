@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { LocalNote, NoteColor, FilterType, SyncStatus } from '@/lib/types';
-import { getAllNotes, putNote } from '@/lib/db';
-import { syncNotes } from '@/lib/sync';
-import { applyNoteUpdates, generateId } from '@/lib/utils';
+import { getAllNotes, putNote, addRevision } from '@/lib/db';
+import pb from '@/lib/pocketbase';
+import { syncNotesWithRecovery } from '@/lib/sync';
+import { applyNoteUpdates, generateId, restoreDeletedNote } from '@/lib/utils';
+
+/** How long the "Note deleted — Undo" offer stays on screen. */
+const UNDO_WINDOW_MS = 7000;
 
 export function useNotes(userId: string | undefined, isOnline: boolean) {
   const [notes, setNotes] = useState<LocalNote[]>([]);
@@ -10,7 +14,13 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
   const [filter, setFilter] = useState<FilterType>('all');
   const [search, setSearch] = useState('');
+  const [lastDeleted, setLastDeleted] = useState<LocalNote | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirrors `lastDeleted` so undoDelete can read it synchronously without
+  // putting side effects inside setState updaters.
+  const lastDeletedRef = useRef<LocalNote | null>(null);
+  lastDeletedRef.current = lastDeleted;
   const loadGeneration = useRef(0);
   const ownerRef = useRef(userId);
   ownerRef.current = userId;
@@ -45,6 +55,10 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
     notesRef.current = [];
     setNotes([]);
     setActiveId(null);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = null;
+    lastDeletedRef.current = null;
+    setLastDeleted(null);
   }, [userId]);
 
   useEffect(() => {
@@ -54,6 +68,7 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
   useEffect(() => {
     return () => {
       if (syncTimer.current) clearTimeout(syncTimer.current);
+      if (undoTimer.current) clearTimeout(undoTimer.current);
     };
   }, [userId]);
 
@@ -64,7 +79,15 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
     }
     setSyncStatus('syncing');
     try {
-      await syncNotes(userId);
+      const outcome = await syncNotesWithRecovery(userId);
+      if (outcome === 'session-expired') {
+        // The auth token is dead (expired/revoked): sign out so the app
+        // falls back to the login screen instead of a permanent "Sync
+        // error" badge. Local notes stay in IndexedDB and reappear when
+        // the same account signs back in.
+        pb.authStore.clear();
+        return;
+      }
       await loadNotes();
       setSyncStatus('synced');
     } catch (err) {
@@ -166,6 +189,16 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
     async (id: string) => {
       const note = notesRef.current.find((n) => n.id === id);
       if (!note) return;
+      // Persist the content as a recoverable revision before tombstoning.
+      if (userId) {
+        await addRevision({
+          ownerId: userId,
+          noteId: note.id,
+          title: note.title,
+          body: note.body,
+          savedAt: Date.now(),
+        });
+      }
       const tombstone = applyNoteUpdates(note, { deleted: true });
       const next = notesRef.current.filter((n) => n.id !== id);
       notesRef.current = next;
@@ -174,10 +207,37 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
       if (activeId === id) {
         setActiveId(next.length > 0 ? next[0].id : null);
       }
+      // Offer undo, replacing any previous offer. The restore path writes a
+      // fresh revision so an in-flight tombstone push cannot mark the note
+      // synced and swallow the undo (see restoreDeletedNote).
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      setLastDeleted(tombstone);
+      undoTimer.current = setTimeout(() => {
+        undoTimer.current = null;
+        setLastDeleted(null);
+      }, UNDO_WINDOW_MS);
       scheduleSync();
     },
-    [activeId, scheduleSync]
+    [userId, activeId, scheduleSync]
   );
+
+  const undoDelete = useCallback(() => {
+    const tombstone = lastDeletedRef.current;
+    if (!tombstone || !userId) return;
+    if (undoTimer.current) {
+      clearTimeout(undoTimer.current);
+      undoTimer.current = null;
+    }
+    lastDeletedRef.current = null;
+    setLastDeleted(null);
+    const restored = restoreDeletedNote(tombstone);
+    const next = [restored, ...notesRef.current.filter((n) => n.id !== restored.id)];
+    notesRef.current = next;
+    setNotes(next);
+    setActiveId(restored.id);
+    void putNote(restored);
+    scheduleSync();
+  }, [userId, scheduleSync]);
 
   const filteredNotes = notes.filter((n) => {
     if (n.ownerId !== userId) return false;
@@ -212,6 +272,8 @@ export function useNotes(userId: string | undefined, isOnline: boolean) {
     archiveNote,
     setColor,
     deleteNote,
+    undoDelete,
+    lastDeleted,
     runSync,
   };
 }

@@ -1,4 +1,5 @@
 import pb from './pocketbase';
+import { ClientResponseError } from 'pocketbase';
 import type { LocalNote, NoteColor } from './types';
 import {
   getAllNotes,
@@ -70,7 +71,9 @@ export interface SyncResult {
 async function performSync(userId: string): Promise<SyncResult> {
   const localNotes = await getAllNotes(userId);
   const remoteNotes = await pb.collection(NOTES_COLLECTION).getFullList<RemoteNote>({
-    filter: `user = "${userId}"`,
+    // pb.filter escapes the value; the backend is shared, so the query must
+    // never be interpolated by hand.
+    filter: pb.filter('user = {:userId}', { userId }),
   });
 
   let pushed = 0;
@@ -187,4 +190,32 @@ export async function syncNotes(userId: string): Promise<SyncResult> {
     release();
     if (syncQueues.get(userId) === current) syncQueues.delete(userId);
   }
+}
+
+/** True when PocketBase rejected the auth token itself (expired or revoked). */
+export function isAuthError(err: unknown): boolean {
+  return err instanceof ClientResponseError && err.status === 401;
+}
+
+/**
+ * Syncs, and on a 401 tries one authRefresh (PocketBase expires auth tokens)
+ * before giving up. Returns 'session-expired' when the refresh also fails —
+ * the caller then signs the user out so the app falls back to the login
+ * screen instead of a permanent "Sync error" badge. Network failures and
+ * non-auth errors propagate untouched.
+ */
+export async function syncNotesWithRecovery(
+  userId: string,
+): Promise<SyncResult | 'session-expired'> {
+  try {
+    return await syncNotes(userId);
+  } catch (err) {
+    if (!isAuthError(err)) throw err;
+  }
+  try {
+    await pb.collection('users').authRefresh();
+  } catch {
+    return 'session-expired';
+  }
+  return await syncNotes(userId);
 }

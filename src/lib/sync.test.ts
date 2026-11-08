@@ -1,18 +1,29 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ClientResponseError } from 'pocketbase';
 import type { LocalNote } from './types';
 
 const pocketbase = vi.hoisted(() => ({
   getFullList: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  authRefresh: vi.fn(),
   collection: vi.fn(),
 }));
 
-vi.mock('./pocketbase', () => ({
-  default: { collection: pocketbase.collection },
-}));
+// filter delegates to a real PocketBase client so the escaped owner query
+// built in performSync is exercised against the genuine SDK implementation.
+vi.mock('./pocketbase', async () => {
+  const { default: PB } = await import('pocketbase');
+  const real = new PB('http://127.0.0.1:8099');
+  return {
+    default: {
+      collection: pocketbase.collection,
+      filter: real.filter.bind(real),
+    },
+  };
+});
 
 function createTestNote(overrides: Partial<LocalNote> = {}): LocalNote {
   return {
@@ -60,8 +71,8 @@ function deferred<T>() {
 
 async function loadModules() {
   const db = await import('./db');
-  const { syncNotes } = await import('./sync');
-  return { ...db, syncNotes };
+  const { syncNotes, syncNotesWithRecovery } = await import('./sync');
+  return { ...db, syncNotes, syncNotesWithRecovery };
 }
 
 describe('account isolation and sync races', () => {
@@ -73,7 +84,9 @@ describe('account isolation and sync races', () => {
       getFullList: pocketbase.getFullList,
       create: pocketbase.create,
       update: pocketbase.update,
+      authRefresh: pocketbase.authRefresh,
     });
+    pocketbase.authRefresh.mockResolvedValue({ record: { id: 'user-a' } });
     pocketbase.getFullList.mockResolvedValue([]);
     pocketbase.create.mockImplementation(async (data) => ({
       id: `remote-${data.client_id}`,
@@ -88,6 +101,10 @@ describe('account isolation and sync races', () => {
 
     await syncNotes('user-a');
 
+    // The owner query must be built with pb.filter (escaped), not interpolated.
+    expect(pocketbase.getFullList).toHaveBeenCalledWith({
+      filter: "user = 'user-a'",
+    });
     expect(pocketbase.create).toHaveBeenCalledTimes(1);
     expect(pocketbase.create.mock.calls[0][0]).toMatchObject({
       client_id: 'a',
@@ -275,5 +292,45 @@ describe('account isolation and sync races', () => {
 
     expect(maximumActive).toBe(1);
     expect(pocketbase.getFullList).toHaveBeenCalledTimes(2);
+  });
+
+  it('refreshes the session and retries once when the sync hits a 401', async () => {
+    const { putNote, syncNotesWithRecovery } = await loadModules();
+    await putNote(
+      createTestNote({ id: 'a', ownerId: 'user-a', remoteId: null, dirty: true }),
+    );
+    pocketbase.getFullList
+      .mockRejectedValueOnce(new ClientResponseError({ status: 401 }))
+      .mockResolvedValueOnce([]);
+    pocketbase.authRefresh.mockResolvedValueOnce({ record: { id: 'user-a' } });
+
+    const outcome = await syncNotesWithRecovery('user-a');
+
+    expect(pocketbase.authRefresh).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({ pushed: 1 });
+    expect(pocketbase.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a dead session when the refresh after a 401 also fails', async () => {
+    const { syncNotesWithRecovery } = await loadModules();
+    pocketbase.getFullList.mockRejectedValue(
+      new ClientResponseError({ status: 401 }),
+    );
+    pocketbase.authRefresh.mockRejectedValue(
+      new ClientResponseError({ status: 401 }),
+    );
+
+    expect(await syncNotesWithRecovery('user-a')).toBe('session-expired');
+    expect(pocketbase.create).not.toHaveBeenCalled();
+  });
+
+  it('does not touch the session for network failures', async () => {
+    const { syncNotesWithRecovery } = await loadModules();
+    pocketbase.getFullList.mockRejectedValue(
+      new ClientResponseError({ status: 0 }),
+    );
+
+    await expect(syncNotesWithRecovery('user-a')).rejects.toThrow();
+    expect(pocketbase.authRefresh).not.toHaveBeenCalled();
   });
 });
