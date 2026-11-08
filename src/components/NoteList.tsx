@@ -115,7 +115,8 @@ export function NoteList({
                   <span className="text-[10px] text-stone-400">
                     {formatRelativeTime(note.updatedAt)}
                   </span>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Always visible on touch screens — there is no hover. */}
+                  <div className="flex gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();

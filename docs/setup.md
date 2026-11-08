@@ -73,5 +73,6 @@ Launches from the MJW Apps Dashboard arrive as `?source=mjw-apps-dash&token=<pb 
 
 ## Known Limitations / Deferred
 
-- **Revisions** are saved to IndexedDB but there is no UI to view/restore them yet.
+- **Revisions** are saved to IndexedDB (on conflicts and deletes) but there is no UI to view/restore them yet; deletes offer a short in-app Undo window instead.
+- **Tombstones accumulate on PocketBase**: deleted notes sync as `deleted=true` records that other devices need in order to learn about the delete, so they are never hard-deleted server-side. Negligible at notes-app scale.
 - **Rich text, checklists, image attachments, reminders, push notifications, shared notes** — all v2 candidates.

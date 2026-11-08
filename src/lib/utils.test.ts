@@ -48,3 +48,24 @@ describe('applyNoteUpdates', () => {
     expect(updated.localRevision).toBe(4);
   });
 });
+
+describe('restoreDeletedNote', () => {
+  it('revives a tombstone as a dirty edit with a fresh revision', () => {
+    const tombstone = createTestNote({
+      deleted: true,
+      dirty: true,
+      localRevision: 5,
+    });
+
+    const restored = utils.restoreDeletedNote(tombstone, 1234);
+
+    expect(restored).toMatchObject({
+      id: 'note-1',
+      ownerId: 'user-a',
+      deleted: false,
+      dirty: true,
+      localRevision: 6,
+      updatedAt: 1234,
+    });
+  });
+});

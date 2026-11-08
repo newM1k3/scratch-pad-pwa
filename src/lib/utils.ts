@@ -15,6 +15,19 @@ export function applyNoteUpdates(
   };
 }
 
+/**
+ * Undoes a delete: revives the tombstone as a dirty edit with a fresh
+ * revision. The bumped revision matters — an in-flight sync that already
+ * read the tombstone must not mark the restored note as synced (the
+ * revision-based guards then push the restored note on the next sync).
+ */
+export function restoreDeletedNote(
+  tombstone: LocalNote,
+  now = Date.now(),
+): LocalNote {
+  return applyNoteUpdates(tombstone, { deleted: false }, now);
+}
+
 export function formatRelativeTime(timestamp: number): string {
   const now = Date.now();
   const diff = now - timestamp;
