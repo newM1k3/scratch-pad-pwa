@@ -67,8 +67,11 @@ This ensures every user can only access their own notes.
 2. **Frontend**: Push to your repository connected to Netlify, or deploy manually. The `netlify.toml` configures the build (`npm run check`), publish directory (`dist`), and SPA redirects.
 3. **Verify**: After deploy, open the app, sign up, and create a note. It should sync to PocketBase and persist across devices.
 
+## Dashboard Handoff
+
+Launches from the MJW Apps Dashboard arrive as `?source=mjw-apps-dash&token=<pb auth token>&uid=<record id>`. The token is validated against PocketBase (`authRefresh`) and the session is only adopted if the refreshed record id matches `uid`. Handoff params are stripped from the URL immediately in every branch, and a failed handoff restores any previous session instead of signing the user out (with no previous session, the normal login screen shows). See `src/lib/handoff.ts`.
+
 ## Known Limitations / Deferred
 
-- **Cross-app token handoff** from `mjw-apps-dash` is partially implemented (token refresh + URL cleanup) but not fully tested end-to-end.
 - **Revisions** are saved to IndexedDB but there is no UI to view/restore them yet.
 - **Rich text, checklists, image attachments, reminders, push notifications, shared notes** — all v2 candidates.
