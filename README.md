@@ -43,5 +43,4 @@ See `docs/setup.md` for environment variables, PocketBase collection schema, API
 ## Unfinished / Stubbed
 
 - Revisions are saved to IndexedDB but there is no UI to view or restore them yet.
-- Cross-app token handoff from `mjw-apps-dash` is partially implemented but not fully tested.
 - Rich text, checklists, image attachments, reminders, push notifications, and shared/collaborative notes are all v2 candidates.

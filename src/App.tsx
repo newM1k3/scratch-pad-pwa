@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { NotebookPen, LogOut, Loader2 } from 'lucide-react';
-import pb from '@/lib/pocketbase';
 import { useAuth } from '@/hooks/useAuth';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useNotes } from '@/hooks/useNotes';
+import { attemptDashHandoff } from '@/lib/handoff';
 import { AuthScreen } from '@/components/AuthScreen';
 import { SyncBadge } from '@/components/SyncBadge';
 import { NoteList } from '@/components/NoteList';
@@ -40,29 +40,11 @@ function App() {
   }, [activeId]);
 
   // Handle dashboard handoff: ?source=mjw-apps-dash&token=...&uid=...
+  // The token is validated against PocketBase and the session is only
+  // adopted if the refreshed record matches the uid param; on failure any
+  // existing session is preserved (see src/lib/handoff.ts).
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const source = params.get('source');
-    const token = params.get('token');
-    const uid = params.get('uid');
-    if (source === 'mjw-apps-dash' && token && uid) {
-      pb.collection('users')
-        .authRefresh()
-        .then(() => {
-          if (pb.authStore.model?.id === uid) {
-            params.delete('source');
-            params.delete('token');
-            params.delete('uid');
-            const remaining = params.toString();
-            const newUrl =
-              window.location.pathname + (remaining ? `?${remaining}` : '');
-            history.replaceState(null, '', newUrl);
-          } else {
-            pb.authStore.clear();
-          }
-        })
-        .catch(() => pb.authStore.clear());
-    }
+    void attemptDashHandoff();
   }, []);
 
   if (loading) {
